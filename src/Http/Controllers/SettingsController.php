@@ -86,10 +86,26 @@ class SettingsController extends Controller
 
             $existingRow = $settingsClass::where('key', $field->attribute)->first();
 
-            $tempResource = new \Laravel\Nova\Support\Fluent;
-            $field->fill($request, $tempResource);
+            // Use an Eloquent-like container that already contains the existing value
+            $tempResource = new class extends \Laravel\Nova\Support\Fluent {
+                public function setAttribute($key, $value)
+                {
+                    // supports "attribute->0->fields->name" style keys
+                    return $this->set(str_replace('->', '.', $key), $value);
+                }
+            };
 
-            if (!array_key_exists($field->attribute, $tempResource->getAttributes())) return;
+            // Pre-fill with the current stored value so that presets (like Repeater JSON) 
+            // can merge incoming changes with the existing data.
+            if (isset($existingRow)) {
+                $tempResource->forceFill([$field->attribute => $existingRow->value]);
+            }
+
+            $callback = $field->fill($request, $tempResource);
+            // Execute any deferred work (file handling, building JSON, etc.)
+            if (is_callable($callback)) {
+                $callback();
+            }
 
             if (isset($existingRow)) {
                 $existingRow->value = $tempResource->{$field->attribute};
